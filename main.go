@@ -67,11 +67,8 @@ type PartResponse struct {
 func analyzeSentimentAI(text string) (string, float64, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
-		log.Printf("DEBUG: No GEMINI_API_KEY found, using fallback analysis")
 		return analyzeSentimentSimple(text), 0.8, nil
 	}
-	
-	log.Printf("DEBUG: Using Gemini Pro API for text: %.50s...", text)
 
 	prompt := fmt.Sprintf(`Analyze the sentiment of this text and respond with ONLY one word: "positive", "negative", or "neutral"
 
@@ -101,37 +98,26 @@ Response:`, text)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Printf("DEBUG: Gemini API request error: %v", err)
 		return analyzeSentimentSimple(text), 0.5, nil
 	}
 	
-	log.Printf("DEBUG: Gemini API response status: %d", resp.StatusCode)
-	
 	if resp.StatusCode != 200 {
-		log.Printf("DEBUG: Gemini API error status %d, using fallback", resp.StatusCode)
 		return analyzeSentimentSimple(text), 0.5, nil
 	}
 	defer resp.Body.Close()
 
 	var geminiResp GeminiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
-		log.Printf("DEBUG: Gemini JSON decode error: %v", err)
 		return analyzeSentimentSimple(text), 0.5, nil
 	}
 
 	if len(geminiResp.Candidates) > 0 && len(geminiResp.Candidates[0].Content.Parts) > 0 {
 		aiResponse := geminiResp.Candidates[0].Content.Parts[0].Text
-		log.Printf("DEBUG: Gemini AI response: %s", aiResponse)
-		
 		sentiment := strings.ToLower(strings.TrimSpace(aiResponse))
+		
 		if sentiment == "positive" || sentiment == "negative" || sentiment == "neutral" {
-			log.Printf("DEBUG: Using Gemini result: %s with score 0.95", sentiment)
 			return sentiment, 0.95, nil
 		}
-		
-		log.Printf("DEBUG: Unexpected Gemini response format: %s", sentiment)
-	} else {
-		log.Printf("DEBUG: Empty Gemini response, using fallback")
 	}
 
 	return analyzeSentimentSimple(text), 0.5, nil
