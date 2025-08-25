@@ -156,6 +156,10 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// Serve static files
+	http.Handle("/", http.FileServer(http.Dir("./public/")))
+	
+	// API endpoints
 	http.HandleFunc("/analyze", handleSentiment)
 	http.HandleFunc("/health", handleHealth)
 	

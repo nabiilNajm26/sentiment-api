@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentiment Analysis Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        
+        .input-section {
+            grid-column: 1 / -1;
+        }
+        
+        .input-section h2 {
+            margin-bottom: 20px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        #textInput {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #e1e5e9;
+            border-radius: 10px;
+            font-size: 16px;
+            resize: vertical;
+            min-height: 60px;
+        }
+        
+        #textInput:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .results {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            display: none;
+        }
+        
+        .sentiment-display {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .sentiment-badge {
+            padding: 8px 16px;
+            border-radius: 25px;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 14px;
+        }
+        
+        .positive { background: #d4edda; color: #155724; }
+        .negative { background: #f8d7da; color: #721c24; }
+        .neutral { background: #e2e3e5; color: #383d41; }
+        
+        .score {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-top: 20px;
+        }
+        
+        .analysis-history {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .history-item {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 10px;
+        }
+        
+        .history-text {
+            font-style: italic;
+            margin-bottom: 8px;
+            color: #666;
+        }
+        
+        .loading {
+            text-align: center;
+            color: #666;
+            padding: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+            
+            .input-group {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Sentiment Analysis Dashboard</h1>
+            <p>Analyze text sentiment with AI-powered insights</p>
+        </div>
+        
+        <div class="dashboard">
+            <div class="card input-section">
+                <h2>Analyze Text Sentiment</h2>
+                <div class="input-group">
+                    <textarea id="textInput" placeholder="Enter your text here to analyze sentiment..."></textarea>
+                    <button onclick="analyzeSentiment()" id="analyzeBtn">Analyze</button>
+                </div>
+                
+                <div id="results" class="results">
+                    <div class="sentiment-display">
+                        <span id="sentimentBadge" class="sentiment-badge"></span>
+                        <span id="scoreDisplay" class="score"></span>
+                    </div>
+                    <div id="analyzedText" class="history-text"></div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Sentiment Distribution</h2>
+                <div class="chart-container">
+                    <canvas id="sentimentChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="card analysis-history">
+                <h2>Analysis History</h2>
+                <div id="historyContainer">
+                    <p class="loading">Start analyzing text to see history...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let analysisHistory = [];
+        let sentimentChart = null;
+        
+        // Initialize chart
+        const ctx = document.getElementById('sentimentChart').getContext('2d');
+        sentimentChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Positive', 'Negative', 'Neutral'],
+                datasets: [{
+                    data: [0, 0, 0],
+                    backgroundColor: ['#28a745', '#dc3545', '#6c757d'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+        
+        async function analyzeSentiment() {
+            const textInput = document.getElementById('textInput');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            const results = document.getElementById('results');
+            
+            const text = textInput.value.trim();
+            if (!text) {
+                alert('Please enter some text to analyze');
+                return;
+            }
+            
+            analyzeBtn.disabled = true;
+            analyzeBtn.textContent = 'Analyzing...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/analyze`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ text })
+                });
+                
+                const data = await response.json();
+                displayResults(data);
+                updateHistory(data);
+                updateChart();
+                
+            } catch (error) {
+                alert('Error analyzing sentiment. Please try again.');
+                console.error('Error:', error);
+            } finally {
+                analyzeBtn.disabled = false;
+                analyzeBtn.textContent = 'Analyze';
+            }
+        }
+        
+        function displayResults(data) {
+            const results = document.getElementById('results');
+            const sentimentBadge = document.getElementById('sentimentBadge');
+            const scoreDisplay = document.getElementById('scoreDisplay');
+            const analyzedText = document.getElementById('analyzedText');
+            
+            sentimentBadge.textContent = data.sentiment;
+            sentimentBadge.className = `sentiment-badge ${data.sentiment}`;
+            
+            scoreDisplay.textContent = `Confidence: ${Math.round(data.score * 100)}%`;
+            analyzedText.textContent = `"${data.text}"`;
+            
+            results.style.display = 'block';
+        }
+        
+        function updateHistory(data) {
+            analysisHistory.unshift(data);
+            if (analysisHistory.length > 10) {
+                analysisHistory = analysisHistory.slice(0, 10);
+            }
+            
+            const historyContainer = document.getElementById('historyContainer');
+            historyContainer.innerHTML = analysisHistory.map(item => `
+                <div class="history-item">
+                    <div class="history-text">"${item.text}"</div>
+                    <div class="sentiment-display">
+                        <span class="sentiment-badge ${item.sentiment}">${item.sentiment}</span>
+                        <span class="score">${Math.round(item.score * 100)}%</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function updateChart() {
+            const counts = { positive: 0, negative: 0, neutral: 0 };
+            
+            analysisHistory.forEach(item => {
+                counts[item.sentiment]++;
+            });
+            
+            sentimentChart.data.datasets[0].data = [
+                counts.positive,
+                counts.negative,
+                counts.neutral
+            ];
+            sentimentChart.update();
+        }
+        
+        // Allow Enter to submit
+        document.getElementById('textInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                analyzeSentiment();
+            }
+        });
+        
+        // Sample texts for demo
+        const sampleTexts = [
+            "I absolutely love this product! It exceeded all my expectations.",
+            "This is the worst experience I've ever had. Completely disappointed.",
+            "The weather is okay today, nothing special.",
+            "Amazing service and fantastic quality. Highly recommended!",
+            "Terrible customer support. Very frustrated with this company."
+        ];
+        
+        // Auto-populate with sample text
+        document.getElementById('textInput').placeholder = sampleTexts[Math.floor(Math.random() * sampleTexts.length)];
+    </script>
+</body>
+</html>
