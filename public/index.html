@@ -415,46 +415,56 @@
         }
         
         async function exportData() {
-            const textInput = document.getElementById('textInput');
             const exportBtn = document.getElementById('exportBtn');
             
-            const text = textInput.value.trim();
-            if (!text) {
-                alert('Please enter some text to export');
+            if (analysisHistory.length === 0) {
+                displayError('No analysis history to export. Please analyze some text first.');
                 return;
             }
-            
-            const texts = text.split('\n').filter(line => line.trim().length > 0);
             
             exportBtn.disabled = true;
             exportBtn.textContent = 'Exporting...';
             
             try {
-                const response = await fetch(`${API_BASE}/export?format=csv`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ texts })
+                // Create CSV content from analysis history
+                let csvContent = "Text,Sentiment,Score,Timestamp\n";
+                
+                analysisHistory.forEach(item => {
+                    const timestamp = new Date().toISOString().split('T')[0]; // Current date
+                    csvContent += `"${item.text.replace(/"/g, '""')}","${item.sentiment}","${(item.score * 100).toFixed(1)}%","${timestamp}"\n`;
                 });
                 
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'sentiment_analysis.csv';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    window.URL.revokeObjectURL(url);
-                } else {
-                    throw new Error('Export failed');
-                }
+                // Create and download the CSV file
+                const blob = new Blob([csvContent], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `sentiment_analysis_${new Date().toISOString().split('T')[0]}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                
+                // Show success message
+                const results = document.getElementById('results');
+                const sentimentBadge = document.getElementById('sentimentBadge');
+                const scoreDisplay = document.getElementById('scoreDisplay');
+                const analyzedText = document.getElementById('analyzedText');
+                
+                sentimentBadge.textContent = 'Export Complete';
+                sentimentBadge.className = 'sentiment-badge positive';
+                scoreDisplay.textContent = `Successfully exported ${analysisHistory.length} analysis results`;
+                analyzedText.textContent = 'CSV file downloaded to your computer';
+                results.style.display = 'block';
+                
+                // Auto-hide success message after 3 seconds
+                setTimeout(() => {
+                    results.style.display = 'none';
+                }, 3000);
                 
             } catch (error) {
-                alert('Error exporting data. Please try again.');
-                console.error('Error:', error);
+                displayError('Error exporting data. Please try again.');
+                console.error('Export Error:', error);
             } finally {
                 exportBtn.disabled = false;
                 exportBtn.textContent = 'Export CSV';
