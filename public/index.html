@@ -191,8 +191,12 @@
             <div class="card input-section">
                 <h2>Analyze Text Sentiment</h2>
                 <div class="input-group">
-                    <textarea id="textInput" placeholder="Enter your text here to analyze sentiment..."></textarea>
-                    <button onclick="analyzeSentiment()" id="analyzeBtn">Analyze</button>
+                    <textarea id="textInput" placeholder="Enter your text here to analyze sentiment... (Use line breaks for batch analysis)"></textarea>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="analyzeSentiment()" id="analyzeBtn">Analyze</button>
+                        <button onclick="analyzeBatch()" id="batchBtn">Batch Analysis</button>
+                        <button onclick="exportData()" id="exportBtn" style="background: #28a745;">Export CSV</button>
+                    </div>
                 </div>
                 
                 <div id="results" class="results">
@@ -273,7 +277,7 @@
                 
                 const data = await response.json();
                 displayResults(data);
-                updateHistory(data);
+                updateHistoryWithData(data);
                 updateChart();
                 
             } catch (error) {
@@ -300,22 +304,12 @@
             results.style.display = 'block';
         }
         
-        function updateHistory(data) {
+        function updateHistoryWithData(data) {
             analysisHistory.unshift(data);
             if (analysisHistory.length > 10) {
                 analysisHistory = analysisHistory.slice(0, 10);
             }
-            
-            const historyContainer = document.getElementById('historyContainer');
-            historyContainer.innerHTML = analysisHistory.map(item => `
-                <div class="history-item">
-                    <div class="history-text">"${item.text}"</div>
-                    <div class="sentiment-display">
-                        <span class="sentiment-badge ${item.sentiment}">${item.sentiment}</span>
-                        <span class="score">${Math.round(item.score * 100)}%</span>
-                    </div>
-                </div>
-            `).join('');
+            updateHistory();
         }
         
         function updateChart() {
@@ -331,6 +325,143 @@
                 counts.neutral
             ];
             sentimentChart.update();
+        }
+        
+        async function analyzeBatch() {
+            const textInput = document.getElementById('textInput');
+            const batchBtn = document.getElementById('batchBtn');
+            
+            const text = textInput.value.trim();
+            if (!text) {
+                alert('Please enter some text to analyze');
+                return;
+            }
+            
+            // Split by line breaks for batch analysis
+            const texts = text.split('\n').filter(line => line.trim().length > 0);
+            
+            if (texts.length === 1) {
+                // Single text, use regular analysis
+                analyzeSentiment();
+                return;
+            }
+            
+            batchBtn.disabled = true;
+            batchBtn.textContent = `Analyzing ${texts.length} texts...`;
+            
+            try {
+                const response = await fetch(`${API_BASE}/analyze/batch`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ texts })
+                });
+                
+                const data = await response.json();
+                displayBatchResults(data);
+                
+                // Add all results to history
+                data.results.forEach(result => {
+                    analysisHistory.unshift(result);
+                });
+                
+                // Keep only last 20 results
+                if (analysisHistory.length > 20) {
+                    analysisHistory = analysisHistory.slice(0, 20);
+                }
+                
+                updateHistory();
+                updateChart();
+                
+            } catch (error) {
+                alert('Error analyzing batch. Please try again.');
+                console.error('Error:', error);
+            } finally {
+                batchBtn.disabled = false;
+                batchBtn.textContent = 'Batch Analysis';
+            }
+        }
+        
+        function displayBatchResults(data) {
+            const results = document.getElementById('results');
+            const sentimentBadge = document.getElementById('sentimentBadge');
+            const scoreDisplay = document.getElementById('scoreDisplay');
+            const analyzedText = document.getElementById('analyzedText');
+            
+            sentimentBadge.textContent = `Batch Complete`;
+            sentimentBadge.className = `sentiment-badge neutral`;
+            
+            scoreDisplay.innerHTML = `
+                <strong>Summary:</strong> 
+                ${data.summary.positive} Positive, 
+                ${data.summary.negative} Negative, 
+                ${data.summary.neutral} Neutral
+            `;
+            
+            analyzedText.textContent = `Analyzed ${data.summary.total} texts`;
+            
+            results.style.display = 'block';
+        }
+        
+        async function exportData() {
+            const textInput = document.getElementById('textInput');
+            const exportBtn = document.getElementById('exportBtn');
+            
+            const text = textInput.value.trim();
+            if (!text) {
+                alert('Please enter some text to export');
+                return;
+            }
+            
+            const texts = text.split('\n').filter(line => line.trim().length > 0);
+            
+            exportBtn.disabled = true;
+            exportBtn.textContent = 'Exporting...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/export?format=csv`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ texts })
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'sentiment_analysis.csv';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                } else {
+                    throw new Error('Export failed');
+                }
+                
+            } catch (error) {
+                alert('Error exporting data. Please try again.');
+                console.error('Error:', error);
+            } finally {
+                exportBtn.disabled = false;
+                exportBtn.textContent = 'Export CSV';
+            }
+        }
+        
+        function updateHistory() {
+            const historyContainer = document.getElementById('historyContainer');
+            historyContainer.innerHTML = analysisHistory.map(item => `
+                <div class="history-item">
+                    <div class="history-text">"${item.text}"</div>
+                    <div class="sentiment-display">
+                        <span class="sentiment-badge ${item.sentiment}">${item.sentiment}</span>
+                        <span class="score">${Math.round(item.score * 100)}%</span>
+                    </div>
+                </div>
+            `).join('');
         }
         
         // Allow Enter to submit

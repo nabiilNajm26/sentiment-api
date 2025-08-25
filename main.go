@@ -20,26 +20,52 @@ type SentimentResponse struct {
 	Score     float64 `json:"score"`
 }
 
-type OpenAIRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
+type BatchRequest struct {
+	Texts []string `json:"texts"`
 }
 
-type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+type BatchResponse struct {
+	Results []SentimentResponse `json:"results"`
+	Summary BatchSummary        `json:"summary"`
 }
 
-type OpenAIResponse struct {
-	Choices []Choice `json:"choices"`
+type BatchSummary struct {
+	Total    int `json:"total"`
+	Positive int `json:"positive"`
+	Negative int `json:"negative"`
+	Neutral  int `json:"neutral"`
 }
 
-type Choice struct {
-	Message Message `json:"message"`
+type GeminiRequest struct {
+	Contents []Content `json:"contents"`
+}
+
+type Content struct {
+	Parts []Part `json:"parts"`
+}
+
+type Part struct {
+	Text string `json:"text"`
+}
+
+type GeminiResponse struct {
+	Candidates []Candidate `json:"candidates"`
+}
+
+type Candidate struct {
+	Content ContentResponse `json:"content"`
+}
+
+type ContentResponse struct {
+	Parts []PartResponse `json:"parts"`
+}
+
+type PartResponse struct {
+	Text string `json:"text"`
 }
 
 func analyzeSentimentAI(text string) (string, float64, error) {
-	apiKey := os.Getenv("OPENAI_API_KEY")
+	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		// Fallback to simple analysis
 		return analyzeSentimentSimple(text), 0.8, nil
@@ -51,21 +77,24 @@ Text: "%s"
 
 Response:`, text)
 
-	reqBody := OpenAIRequest{
-		Model: "gpt-3.5-turbo",
-		Messages: []Message{
-			{Role: "user", Content: prompt},
+	reqBody := GeminiRequest{
+		Contents: []Content{
+			{
+				Parts: []Part{
+					{Text: prompt},
+				},
+			},
 		},
 	}
 
 	jsonData, _ := json.Marshal(reqBody)
 	
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonData))
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=%s", apiKey)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return analyzeSentimentSimple(text), 0.5, nil
 	}
 
-	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -74,13 +103,13 @@ Response:`, text)
 	}
 	defer resp.Body.Close()
 
-	var openAIResp OpenAIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&openAIResp); err != nil {
+	var geminiResp GeminiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
 		return analyzeSentimentSimple(text), 0.5, nil
 	}
 
-	if len(openAIResp.Choices) > 0 {
-		sentiment := strings.ToLower(strings.TrimSpace(openAIResp.Choices[0].Message.Content))
+	if len(geminiResp.Candidates) > 0 && len(geminiResp.Candidates[0].Content.Parts) > 0 {
+		sentiment := strings.ToLower(strings.TrimSpace(geminiResp.Candidates[0].Content.Parts[0].Text))
 		if sentiment == "positive" || sentiment == "negative" || sentiment == "neutral" {
 			return sentiment, 0.95, nil
 		}
@@ -150,14 +179,123 @@ func handleSentiment(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+func handleBatchSentiment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	
+	var req BatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	
+	if len(req.Texts) == 0 {
+		http.Error(w, "Texts array is required", http.StatusBadRequest)
+		return
+	}
+	
+	if len(req.Texts) > 50 {
+		http.Error(w, "Maximum 50 texts allowed per batch", http.StatusBadRequest)
+		return
+	}
+	
+	var results []SentimentResponse
+	summary := BatchSummary{Total: len(req.Texts)}
+	
+	for _, text := range req.Texts {
+		sentiment, score, _ := analyzeSentimentAI(text)
+		
+		result := SentimentResponse{
+			Text:      text,
+			Sentiment: sentiment,
+			Score:     score,
+		}
+		
+		results = append(results, result)
+		
+		switch sentiment {
+		case "positive":
+			summary.Positive++
+		case "negative":
+			summary.Negative++
+		default:
+			summary.Neutral++
+		}
+	}
+	
+	response := BatchResponse{
+		Results: results,
+		Summary: summary,
+	}
+	
+	json.NewEncoder(w).Encode(response)
+}
+
+func handleExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "json"
+	}
+	
+	var req BatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	
+	var results []SentimentResponse
+	for _, text := range req.Texts {
+		sentiment, score, _ := analyzeSentimentAI(text)
+		results = append(results, SentimentResponse{
+			Text:      text,
+			Sentiment: sentiment,
+			Score:     score,
+		})
+	}
+	
+	switch format {
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=sentiment_analysis.csv")
+		
+		fmt.Fprintf(w, "Text,Sentiment,Score\n")
+		for _, result := range results {
+			fmt.Fprintf(w, "\"%s\",%s,%.2f\n", result.Text, result.Sentiment, result.Score)
+		}
+		
+	default: // json
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", "attachment; filename=sentiment_analysis.json")
+		json.NewEncoder(w).Encode(results)
+	}
+}
+
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "ok",
+		"version": "1.0",
+		"features": "single-analysis,batch-analysis,data-export",
+	})
 }
 
 func main() {
 	// API endpoints first
 	http.HandleFunc("/analyze", handleSentiment)
+	http.HandleFunc("/analyze/batch", handleBatchSentiment)
+	http.HandleFunc("/export", handleExport)
 	http.HandleFunc("/health", handleHealth)
 	
 	// Serve static files
