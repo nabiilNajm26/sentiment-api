@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -18,7 +20,76 @@ type SentimentResponse struct {
 	Score     float64 `json:"score"`
 }
 
-func analyzeSentiment(text string) (string, float64) {
+type OpenAIRequest struct {
+	Model    string    `json:"model"`
+	Messages []Message `json:"messages"`
+}
+
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type OpenAIResponse struct {
+	Choices []Choice `json:"choices"`
+}
+
+type Choice struct {
+	Message Message `json:"message"`
+}
+
+func analyzeSentimentAI(text string) (string, float64, error) {
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		// Fallback to simple analysis
+		return analyzeSentimentSimple(text), 0.8, nil
+	}
+
+	prompt := fmt.Sprintf(`Analyze the sentiment of this text and respond with ONLY one word: "positive", "negative", or "neutral"
+
+Text: "%s"
+
+Response:`, text)
+
+	reqBody := OpenAIRequest{
+		Model: "gpt-3.5-turbo",
+		Messages: []Message{
+			{Role: "user", Content: prompt},
+		},
+	}
+
+	jsonData, _ := json.Marshal(reqBody)
+	
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return analyzeSentimentSimple(text), 0.5, nil
+	}
+
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		return analyzeSentimentSimple(text), 0.5, nil
+	}
+	defer resp.Body.Close()
+
+	var openAIResp OpenAIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&openAIResp); err != nil {
+		return analyzeSentimentSimple(text), 0.5, nil
+	}
+
+	if len(openAIResp.Choices) > 0 {
+		sentiment := strings.ToLower(strings.TrimSpace(openAIResp.Choices[0].Message.Content))
+		if sentiment == "positive" || sentiment == "negative" || sentiment == "neutral" {
+			return sentiment, 0.95, nil
+		}
+	}
+
+	return analyzeSentimentSimple(text), 0.5, nil
+}
+
+func analyzeSentimentSimple(text string) string {
 	text = strings.ToLower(text)
 	
 	positiveWords := []string{"good", "great", "excellent", "amazing", "wonderful", "love", "happy", "awesome", "fantastic"}
@@ -40,12 +111,12 @@ func analyzeSentiment(text string) (string, float64) {
 	}
 	
 	if positiveCount > negativeCount {
-		return "positive", float64(positiveCount) / float64(positiveCount+negativeCount)
+		return "positive"
 	} else if negativeCount > positiveCount {
-		return "negative", float64(negativeCount) / float64(positiveCount+negativeCount)
+		return "negative"
 	}
 	
-	return "neutral", 0.5
+	return "neutral"
 }
 
 func handleSentiment(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +139,7 @@ func handleSentiment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	sentiment, score := analyzeSentiment(req.Text)
+	sentiment, score, _ := analyzeSentimentAI(req.Text)
 	
 	response := SentimentResponse{
 		Text:      req.Text,
