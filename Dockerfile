@@ -10,6 +10,7 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 
 COPY --from=builder /app/app .
+COPY public/ ./public/
 
 EXPOSE 8080
 CMD ["./app"]
