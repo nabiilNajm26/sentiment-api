@@ -156,12 +156,12 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	// Serve static files
-	http.Handle("/", http.FileServer(http.Dir("./public/")))
-	
-	// API endpoints
+	// API endpoints first
 	http.HandleFunc("/analyze", handleSentiment)
 	http.HandleFunc("/health", handleHealth)
+	
+	// Serve static files
+	http.Handle("/", http.FileServer(http.Dir("./public/")))
 	
 	port := os.Getenv("PORT")
 	if port == "" {
